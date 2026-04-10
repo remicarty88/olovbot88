@@ -33,7 +33,7 @@ class Form(StatesGroup):
     add_payment_amount = State()
     add_payment_date = State()
 
-# --- РАБОТА С FIREBASE (Direct HTTP) ---
+# --- РАБОТА С БАЗОЙ ДАННЫХ (Direct HTTP) ---
 async def fb_get(path=""):
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{FIREBASE_URL}{path}.json")
@@ -105,7 +105,9 @@ async def process_auth(callback: types.CallbackQuery):
         await callback.answer("Только администратор может это делать!", show_alert=True)
         return
 
-    action, _, user_id = callback.data.split("_")
+    parts = callback.data.split("_")
+    action = parts[1]  # 'accept' or 'reject'
+    user_id = parts[2]
     
     if action == "accept":
         await fb_put(f"allowed_users/{user_id}", True)
@@ -572,7 +574,7 @@ async def export_to_excel_msg(message: types.Message):
                 })
         df_history = pd.DataFrame(history_data) if history_data else pd.DataFrame(columns=["Поставщик", "Сумма (UZS)", "Тип", "Дата"])
 
-        filename = f"Firebase_Debt_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filename = f"Debt_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         print(f"DEBUG: Создаем файл {filename}")
         
         # Сортировка истории по дате
@@ -618,7 +620,7 @@ async def export_to_excel_msg(message: types.Message):
 
         print(f"DEBUG: Файл создан успешно. Отправляем в Telegram...")
         file = FSInputFile(filename)
-        await message.answer_document(file, caption=f"📊 Балансовый отчет (Firebase)\n💰 Остаток: {df_summary['Остаток к оплате'].sum():,.0f} сум")
+        await message.answer_document(file, caption=f"📊 Балансовый отчет\n💰 Остаток: {df_summary['Остаток к оплате'].sum():,.0f} сум")
         
         if os.path.exists(filename):
             os.remove(filename)
@@ -645,7 +647,7 @@ async def confirm_clear(callback: types.CallbackQuery):
 async def clear_database(callback: types.CallbackQuery):
     await fb_delete("suppliers")
     await fb_delete("debts")
-    await callback.message.edit_text("🔥 База данных Firebase полностью очищена.")
+    await callback.message.edit_text("🔥 База данных полностью очищена.")
 
 @router.callback_query(F.data == "cancel_clear")
 async def cancel_clear(callback: types.CallbackQuery):
@@ -655,7 +657,7 @@ async def cancel_clear(callback: types.CallbackQuery):
 async def main():
     dp = Dispatcher()
     dp.include_router(router)
-    print("Бот запущен на Firebase...")
+    print("Бот запущен...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
