@@ -14,6 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 # Загрузка переменных окружения
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 6201234513
 FIREBASE_URL = "https://neonapp-a05b0-default-rtdb.firebaseio.com/"
 
 # Инициализация бота
@@ -51,6 +52,10 @@ async def fb_delete(path):
     async with httpx.AsyncClient() as client:
         await client.delete(f"{FIREBASE_URL}{path}.json")
 
+async def is_user_allowed(user_id):
+    users = await fb_get(f"allowed_users/{user_id}")
+    return users == True or str(user_id) == str(ADMIN_ID)
+
 # Клавиатуры
 def main_reply_keyboard():
     builder = ReplyKeyboardBuilder()
@@ -73,9 +78,43 @@ def main_menu():
 # Обработчики команд
 @router.message(Command("start"))
 async def start_cmd(message: types.Message):
-    await message.answer("👋 Привет! Я бот для отслеживания долгов (Firebase Realtime).\n\n"
-                         "Используйте кнопки меню для управления данными:", 
-                         reply_markup=main_reply_keyboard())
+    user_id = message.from_user.id
+    
+    # Если это админ или разрешенный пользователь
+    if await is_user_allowed(user_id):
+        await message.answer("👋 С возвращением! Выберите действие:", 
+                             reply_markup=main_reply_keyboard())
+        return
+
+    # Если пользователь новый - отправляем запрос админу
+    await message.answer("⏳ Запрос на доступ отправлен администратору. Ожидайте подтверждения...")
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Принять", callback_data=f"auth_accept_{user_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"auth_reject_{user_id}")
+    )
+    
+    user_info = f"👤 **Новый запрос доступа:**\nID: `{user_id}`\nИмя: {message.from_user.full_name}\nUsername: @{message.from_user.username}"
+    await bot.send_message(chat_id=ADMIN_ID, text=user_info, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+# Обработка авторизации админом
+@router.callback_query(F.data.startswith("auth_"))
+async def process_auth(callback: types.CallbackQuery):
+    if str(callback.from_user.id) != str(ADMIN_ID):
+        await callback.answer("Только администратор может это делать!", show_alert=True)
+        return
+
+    action, _, user_id = callback.data.split("_")
+    
+    if action == "accept":
+        await fb_put(f"allowed_users/{user_id}", True)
+        await bot.send_message(chat_id=user_id, text="✅ Доступ разрешен! Используйте кнопки меню:", reply_markup=main_reply_keyboard())
+        await callback.message.edit_text(f"✅ Пользователь {user_id} допущен.")
+    else:
+        await bot.send_message(chat_id=user_id, text="❌ К сожалению, вам отказано в доступе.")
+        await callback.message.edit_text(f"❌ Пользователю {user_id} отказано.")
+    await callback.answer()
 
 # Обработка Reply-кнопок
 @router.message(F.text == "📦 Поставщики")
